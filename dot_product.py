@@ -51,6 +51,46 @@ def dot_product(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
     
     return result
 
+
+def benchmark():
+    import time
+    print(f"{'N':<10} | {'cuTile (ms)':<15} | {'PyTorch (ms)':<15} | {'Speedup':<10}")
+    print("-" * 60)
+    
+    for power in range(7, 21): # 2^7 to 2^20
+        N = 2 ** power
+        a = torch.randn(N, dtype=torch.float32, device='cuda')
+        b = torch.randn(N, dtype=torch.float32, device='cuda')
+        
+        # Warmup and Correctness Check
+        cutile_res = dot_product(a, b)
+        torch_res = torch.dot(a, b)
+        torch.testing.assert_close(cutile_res[0], torch_res, rtol=1e-4, atol=1e-4)
+        
+        # Timing cuTile
+        start_event = torch.cuda.Event(enable_timing=True)
+        end_event = torch.cuda.Event(enable_timing=True)
+        
+        torch.cuda.synchronize()
+        start_event.record()
+        for _ in range(100):
+            dot_product(a, b)
+        end_event.record()
+        torch.cuda.synchronize()
+        cutile_time = start_event.elapsed_time(end_event) / 100
+        
+        # Timing PyTorch
+        torch.cuda.synchronize()
+        start_event.record()
+        for _ in range(100):
+            torch.dot(a, b)
+        end_event.record()
+        torch.cuda.synchronize()
+        torch_time = start_event.elapsed_time(end_event) / 100
+        
+        speedup = torch_time / cutile_time if cutile_time > 0 else 0.0
+        print(f"{N:<10} | {cutile_time:<15.4f} | {torch_time:<15.4f} | {speedup:<10.2f}")
+
 def run_test():
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -59,7 +99,17 @@ def run_test():
         help="Check the correctness of the results",
         default=True,
     )
+    parser.add_argument(
+        "--benchmark",
+        action="store_true",
+        help="Run benchmark varying N from 128 to 2^20",
+        default=False,
+    )
     args = parser.parse_args()
+
+    if args.benchmark:
+        benchmark()
+        return
 
     N = 1024 * 1024
     
